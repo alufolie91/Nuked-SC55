@@ -654,8 +654,15 @@ void FE_EventLoop(FE_Application& fe)
                 continue;
             }
 
+            const bool mKeydown = (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_M);
+
             for (size_t i = 0; i < fe.instances_in_use; ++i)
             {
+                if (mKeydown)
+                {
+                    fe.instances[i].emu.Reset();
+                }
+
                 if (fe.instances[i].sdl_lcd)
                 {
                     fe.instances[i].sdl_lcd->HandleEvent(ev);
