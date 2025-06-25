@@ -58,6 +58,7 @@ enum class EMU_SystemReset {
     NONE,
     GS_RESET,
     GM_RESET,
+    RESET_NOTES,
 };
 
 struct Emulator {

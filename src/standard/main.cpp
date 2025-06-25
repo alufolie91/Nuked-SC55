@@ -660,7 +660,8 @@ void FE_EventLoop(FE_Application& fe)
             {
                 if (mKeydown)
                 {
-                    fe.instances[i].emu.Reset();
+                    //fe.instances[i].emu.Reset();
+                    fe.instances[i].emu.PostSystemReset(EMU_SystemReset::RESET_NOTES);
                 }
 
                 if (fe.instances[i].sdl_lcd)
