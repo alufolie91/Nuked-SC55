@@ -19,6 +19,7 @@
 #include <string>
 #include <thread>
 
+#include "common/gain.h"
 #include "common/rom_loader.h"
 
 #ifdef _WIN32
@@ -58,6 +59,8 @@ struct R_Parameters
     R_EndBehavior end_behavior = R_EndBehavior::Cut;
     std::filesystem::path nvram_filename;
     bool legacy_romset_detection = false;
+    bool dump_emidi_loop_points = false;
+    float gain = 1.0f;
     R_AdvancedParameters adv;
 };
 
@@ -74,6 +77,7 @@ enum class R_ParseError
     FormatInvalid,
     EndInvalid,
     ResetInvalid,
+    GainInvalid,
 };
 
 const char* R_ParseErrorStr(R_ParseError err)
@@ -102,6 +106,8 @@ const char* R_ParseErrorStr(R_ParseError err)
             return "End behavior invalid";
         case R_ParseError::ResetInvalid:
             return "Reset invalid (should be none, gs, or gm)";
+        case R_ParseError::GainInvalid:
+            return "Gain invalid (should be a number optionally ending in 'db')";
     }
     return "Unknown error";
 }
@@ -239,6 +245,18 @@ R_ParseError R_ParseCommandLine(int argc, char* argv[], R_Parameters& result)
         {
             result.disable_oversampling = true;
         }
+        else if (reader.Any("--gain"))
+        {
+            if (!reader.Next())
+            {
+                return R_ParseError::UnexpectedEnd;
+            }
+
+            if (common::ParseGain(reader.Arg(), result.gain) != common::ParseGainResult{})
+            {
+                return R_ParseError::GainInvalid;
+            }
+        }
         else if (reader.Any("--legacy-romset-detection"))
         {
             result.legacy_romset_detection = true;
@@ -335,6 +353,10 @@ R_ParseError R_ParseCommandLine(int argc, char* argv[], R_Parameters& result)
 
             result.adv.rom_overrides[(size_t)RomLocation::WAVEROM_EXP] = reader.Arg();
         }
+        else if (reader.Any("--dump-emidi-loop-points"))
+        {
+            result.dump_emidi_loop_points = true;
+        }
         else
         {
             if (result.input_filename.size())
@@ -358,6 +380,7 @@ R_ParseError R_ParseCommandLine(int argc, char* argv[], R_Parameters& result)
     return R_ParseError::Success;
 }
 
+[[noreturn]]
 void R_Panic(const char* msg, const std::source_location where = std::source_location::current())
 {
     fprintf(stderr, "%s:%d: in %s: %s", where.file_name(), (int)where.line(), where.function_name(), msg);
@@ -642,6 +665,11 @@ public:
         return m_chunk_size;
     }
 
+    size_t GetFramesWritten(size_t queue_id) const
+    {
+        return m_frames_written[queue_id];
+    }
+
     // Sets number of queues and prepares a chunk builder for each.
     // precondition: 0 <= count <= QUEUE_COUNT
     template <typename T>
@@ -666,6 +694,7 @@ public:
             m_cond.notify_one();
             m_chunks[queue_id] = AllocChunk<T>();
         }
+        ++m_frames_written[queue_id];
     }
 
     // Enqueues whatever data is left in the chunk builder for queue_id and marks it as complete. After this call, no
@@ -783,6 +812,7 @@ private:
     R_ChunkQueue m_queues[QUEUE_COUNT];
     R_OwnedChunk m_chunks[QUEUE_COUNT];
     bool         m_queue_complete[QUEUE_COUNT]{};
+    size_t       m_frames_written[QUEUE_COUNT]{};
 
     size_t m_queues_in_use = 0;
 
@@ -792,6 +822,47 @@ private:
     // Synchronization between producers/consumer.
     std::mutex              m_mutex;
     std::condition_variable m_cond;
+};
+
+enum R_LoopPointType
+{
+    Start,
+    End,
+};
+
+struct R_LoopPoint
+{
+    R_LoopPointType type;
+    uint64_t        frame;
+    uint64_t        timestamp_ns;
+    uint16_t        midi_track;
+    uint8_t         midi_channel;
+};
+
+class R_LoopPointRecorder
+{
+public:
+    void Record(const R_LoopPoint& point)
+    {
+        std::scoped_lock lk(m_mutex);
+        m_loop_points.emplace_back(point);
+    }
+
+    void SortByTrack()
+    {
+        std::stable_sort(m_loop_points.begin(), m_loop_points.end(), [](const auto& a, const auto& b) {
+            return a.midi_track < b.midi_track;
+        });
+    }
+
+    std::span<const R_LoopPoint> GetLoopPoints() const
+    {
+        return m_loop_points;
+    }
+
+private:
+    std::mutex                    m_mutex;
+    std::vector<R_LoopPoint> m_loop_points;
 };
 
 struct R_TrackRenderState
@@ -805,21 +876,45 @@ struct R_TrackRenderState
     std::chrono::high_resolution_clock::duration elapsed;
     size_t num_silent_frames = 0;
     R_EndBehavior end_behavior;
+    R_LoopPointRecorder* loop_recorder;
+    AudioFormat output_format;
+    float gain = 1.0f;
 
     // these fields are accessed from main thread during render process
     std::atomic<size_t> events_processed = 0;
     std::atomic<bool> done;
 };
 
-bool R_IsSilence(const AudioFrame<int32_t>& in_raw)
+struct R_SilenceModelNone
 {
-    // The emulator doesn't produce exact zeroes when no notes are playing.
-    constexpr int32_t MIN = -0x4000;
-    constexpr int32_t MAX = +0x4000;
-    return MIN <= in_raw.left && in_raw.left <= MAX && MIN <= in_raw.right && in_raw.right <= MAX;
-}
+    static constexpr bool IsSilence(const AudioFrame<int32_t>& in_raw)
+    {
+        (void)in_raw;
+        return false;
+    }
+};
 
-template <typename SampleT>
+struct R_SilenceModelGeneric
+{
+    static constexpr bool IsSilence(const AudioFrame<int32_t>& in_raw)
+    {
+        // The emulator doesn't produce exact zeroes when no notes are playing.
+        constexpr int32_t MIN = -0x4000;
+        constexpr int32_t MAX = +0x4000;
+        return MIN <= in_raw.left && in_raw.left <= MAX && MIN <= in_raw.right && in_raw.right <= MAX;
+    }
+};
+
+struct R_SilenceModelMK1
+{
+    static constexpr bool IsSilence(const AudioFrame<int32_t>& in_raw)
+    {
+        // MK1 has a DC offset. TODO: Maybe want thresholds too?
+        return in_raw.left == 0x1000000 && in_raw.right == 0x1000000;
+    }
+};
+
+template <typename SampleT, typename SilenceModel, bool ApplyGain>
 void R_ReceiveSample(void* userdata, const AudioFrame<int32_t>& in)
 {
     R_TrackRenderState* state = (R_TrackRenderState*)userdata;
@@ -827,13 +922,22 @@ void R_ReceiveSample(void* userdata, const AudioFrame<int32_t>& in)
     AudioFrame<SampleT> out;
     Normalize(in, out);
 
-    if (R_IsSilence(in))
+    // Skip silence processing until end of track
+    if constexpr (!std::is_same_v<SilenceModel, R_SilenceModelNone>)
     {
-        ++state->num_silent_frames;
+        if (SilenceModel::IsSilence(in))
+        {
+            ++state->num_silent_frames;
+        }
+        else
+        {
+            state->num_silent_frames = 0;
+        }
     }
-    else
+
+    if constexpr (ApplyGain)
     {
-        state->num_silent_frames = 0;
+        Scale(out, state->gain);
     }
 
     state->mixer->SubmitFrame(state->queue_id, out);
@@ -905,6 +1009,78 @@ uint64_t R_NSPerStep(Emulator& emu)
     }
 }
 
+void R_NsToTimeString(uint64_t ns, std::string& result)
+{
+    // one second in nanoseconds
+    constexpr uint64_t ONE_SEC = 1'000'000'000;
+
+    const uint64_t min  = ns / (60 * ONE_SEC);
+    const uint64_t sec  = (ns / ONE_SEC) % 60;
+    const uint64_t fsec = (uint64_t)(100.0 * ((double)(ns % ONE_SEC) / (double)ONE_SEC));
+
+    result.clear();
+    if (min < 10)
+    {
+        result += '0';
+    }
+    result += std::to_string(min);
+    result += ':';
+    if (sec < 10)
+    {
+        result += '0';
+    }
+    result += std::to_string(sec);
+    result += '.';
+    if (fsec < 10)
+    {
+        result += '0';
+    }
+    result += std::to_string(fsec);
+}
+
+bool R_IsEMIDILoopStart(const SMF_Data& data, const SMF_Event& ev)
+{
+    return ev.IsControlChange() && ev.GetData(data.bytes)[0] == 116;
+}
+
+bool R_IsEMIDILoopEnd(const SMF_Data& data, const SMF_Event& ev)
+{
+    return ev.IsControlChange() && ev.GetData(data.bytes)[0] == 117;
+}
+
+template <typename SilenceModel>
+constexpr mcu_sample_callback R_PickCallback(const R_TrackRenderState& state)
+{
+    if (state.gain != 1.0f)
+    {
+        switch (state.output_format)
+        {
+        case AudioFormat::S16:
+            return R_ReceiveSample<int16_t, SilenceModel, true>;
+        case AudioFormat::S32:
+            return R_ReceiveSample<int32_t, SilenceModel, true>;
+        case AudioFormat::F32:
+            return R_ReceiveSample<float, SilenceModel, true>;
+        }
+    }
+    else
+    {
+        switch (state.output_format)
+        {
+        case AudioFormat::S16:
+            return R_ReceiveSample<int16_t, SilenceModel, false>;
+        case AudioFormat::S32:
+            return R_ReceiveSample<int32_t, SilenceModel, false>;
+        case AudioFormat::F32:
+            return R_ReceiveSample<float, SilenceModel, false>;
+        }
+    }
+
+    fprintf(stderr, "output_format = %d\n", (int)state.output_format);
+    fprintf(stderr, "gain = %f\n", state.gain);
+    R_Panic("no valid callback for state");
+}
+
 void R_RenderOne(const SMF_Data& data, R_TrackRenderState& state)
 {
     uint64_t division = data.header.division;
@@ -937,11 +1113,43 @@ void R_RenderOne(const SMF_Data& data, R_TrackRenderState& state)
             R_PostEvent(state.emu, data, event);
         }
 
+        // Save loop points - they will be processed on the main thread later
+        if (R_IsEMIDILoopStart(data, event))
+        {
+            state.loop_recorder->Record({
+                .type         = R_LoopPointType::Start,
+                .frame        = state.mixer->GetFramesWritten(state.queue_id),
+                .timestamp_ns = state.ns_simulated,
+                .midi_track   = event.track_id,
+                .midi_channel = event.GetChannel(),
+            });
+        }
+        else if (R_IsEMIDILoopEnd(data, event))
+        {
+            state.loop_recorder->Record({
+                .type         = R_LoopPointType::End,
+                .frame        = state.mixer->GetFramesWritten(state.queue_id),
+                .timestamp_ns = state.ns_simulated,
+                .midi_track   = event.track_id,
+                .midi_channel = event.GetChannel(),
+            });
+        }
+
         ++state.events_processed;
     }
 
     if (state.end_behavior == R_EndBehavior::Release)
     {
+        // Enable silence processing callback
+        if (state.emu.GetMCU().is_mk1)
+        {
+            state.emu.SetSampleCallback(R_PickCallback<R_SilenceModelMK1>(state), &state);
+        }
+        else
+        {
+            state.emu.SetSampleCallback(R_PickCallback<R_SilenceModelGeneric>(state), &state);
+        }
+
         const uint32_t frequency = PCM_GetOutputFrequency(state.emu.GetPCM());
         // TODO: make this configurable? do we care? currently 100ms
         const size_t silence_time = frequency / 10;
@@ -1052,6 +1260,8 @@ bool R_RenderTrack(const SMF_Data& data, const R_Parameters& params)
         reset = EMU_SystemReset::GS_RESET;
     }
 
+    fprintf(stderr, "Gain set to %.2fdb\n", common::ScalarToDb(params.gain));
+
     R_Mixer mixer;
     switch (params.output_format)
     {
@@ -1065,6 +1275,8 @@ bool R_RenderTrack(const SMF_Data& data, const R_Parameters& params)
         mixer.SetQueueCount<float>(instances);
         break;
     }
+
+    R_LoopPointRecorder loop_recorder;
 
     R_TrackRenderState render_states[SMF_CHANNEL_COUNT];
     for (size_t i = 0; i < instances; ++i)
@@ -1091,23 +1303,15 @@ bool R_RenderTrack(const SMF_Data& data, const R_Parameters& params)
         fprintf(stderr, "Initializing emulator #%02zu...\n", i);
         R_RunReset(render_states[i].emu, reset);
 
-        switch (params.output_format)
-        {
-        case AudioFormat::S16:
-            render_states[i].emu.SetSampleCallback(R_ReceiveSample<int16_t>, &render_states[i]);
-            break;
-        case AudioFormat::S32:
-            render_states[i].emu.SetSampleCallback(R_ReceiveSample<int32_t>, &render_states[i]);
-            break;
-        case AudioFormat::F32:
-            render_states[i].emu.SetSampleCallback(R_ReceiveSample<float>, &render_states[i]);
-            break;
-        }
-
         render_states[i].track = &split_tracks.tracks[i];
         render_states[i].mixer = &mixer;
         render_states[i].queue_id = i;
         render_states[i].end_behavior = params.end_behavior;
+        render_states[i].loop_recorder = &loop_recorder;
+        render_states[i].output_format = params.output_format;
+        render_states[i].gain = params.gain;
+
+        render_states[i].emu.SetSampleCallback(R_PickCallback<R_SilenceModelNone>(render_states[i]), &render_states[i]);
 
         render_states[i].thread = std::thread(R_RenderOne, std::cref(data), std::ref(render_states[i]));
     }
@@ -1184,6 +1388,37 @@ bool R_RenderTrack(const SMF_Data& data, const R_Parameters& params)
 
     mix_out_thread.join();
 
+    if (params.dump_emidi_loop_points)
+    {
+        loop_recorder.SortByTrack();
+
+        const uint32_t frequency = PCM_GetOutputFrequency(render_states[0].emu.GetPCM());
+        fprintf(stderr, "rate=%zu\n", (size_t)frequency);
+
+        std::string time_str;
+        for (const auto& point : loop_recorder.GetLoopPoints())
+        {
+            R_NsToTimeString(point.timestamp_ns, time_str);
+            switch (point.type)
+            {
+            case R_LoopPointType::Start:
+                fprintf(stderr,
+                        "track %d loop start at sample=%zu timestamp=%s\n",
+                        point.midi_track,
+                        point.frame,
+                        time_str.c_str());
+                break;
+            case R_LoopPointType::End:
+                fprintf(stderr,
+                        "track %d loop end at sample=%zu timestamp=%s\n",
+                        point.midi_track,
+                        point.frame,
+                        time_str.c_str());
+                break;
+            }
+        }
+    }
+
     if (params.debug)
     {
         for (size_t i = 0; i < instances; ++i)
@@ -1217,6 +1452,7 @@ General options:
 Audio options:
   -f, --format s16|s32|f32     Set output format.
   --disable-oversampling       Halves output frequency.
+  --gain <amount>              Apply gain to the output.
   --end cut|release            Choose how the end of the track is handled:
         cut (default)              Stop rendering at the last MIDI event
         release                    Continue to render audio after the last MIDI event until silence
@@ -1232,6 +1468,9 @@ ROM management options:
                                not also passing --romset.
   --romset <name>              Sets the romset to load.
   --legacy-romset-detection    Load roms using specific filenames like upstream.
+
+MIDI options:
+  --dump-emidi-loop-points     Prints any encountered EMIDI loop points to stderr when finished.
 
 )";
 

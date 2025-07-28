@@ -1,3 +1,20 @@
+# Version 0.6.1 (TBD)
+
+## Enhancements
+
+- Added a `--gain <amount>` option to both frontends. This can be used to
+  increase or decrease the output volume. `<amount>` can be specified in either
+  decibels or as a scalar value. See documentation for details. (#46)
+- Added basic support for dumping EMIDI loop points. Currently, this only
+  includes CC 116 (track loop start) and CC 117 (track loop end). Pass
+  `--dump-emidi-loop-points` to the renderer to enable this feature. (#47)
+- Completed the SCC-1A romset hashes thanks to @Karmeck. (#49)
+
+## Bugfixes
+
+- Renderer `--end release` option now properly accounts for the MK1's DC
+  offset. (#48)
+
 # Version 0.6.0 (2025-06-09)
 
 This release contains bugfixes and a couple quality of life enhancements.

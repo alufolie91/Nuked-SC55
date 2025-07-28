@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 3.19)
-project (nuked-sc55 VERSION 0.6.0 LANGUAGES C CXX)
+project (nuked-sc55 VERSION 0.6.1 LANGUAGES C CXX)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -105,6 +105,7 @@ target_enable_warnings(nuked-sc55-backend)
 add_library(nuked-sc55-common)
 target_sources(nuked-sc55-common
     PRIVATE
+    src/common/gain.cpp
     src/common/rom_loader.cpp
 )
 target_compile_features(nuked-sc55-common PRIVATE cxx_std_23)
