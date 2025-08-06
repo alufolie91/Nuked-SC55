@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 3.19)
-project (nuked-sc55 VERSION 0.6.1 LANGUAGES C CXX)
+project (nuked-sc55 VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -60,7 +60,6 @@ target_sources(nuked-sc55-backend
     src/backend/mcu_interrupt.cpp
     src/backend/mcu_opcodes.cpp
     src/backend/mcu_timer.cpp
-    src/backend/path_util.cpp
     src/backend/pcm.cpp
     src/backend/rom.cpp
     src/backend/rom_io.cpp
@@ -77,8 +76,8 @@ target_sources(nuked-sc55-backend
     FILES
     "${CMAKE_CURRENT_BINARY_DIR}/backend/config.h"
     src/backend/audio.h
+    src/backend/bounded_ordered_bitset.h
     src/backend/cast.h
-    src/backend/command_line.h
     src/backend/emu.h
     src/backend/lcd.h
     src/backend/lcd_back.h
@@ -88,7 +87,6 @@ target_sources(nuked-sc55-backend
     src/backend/mcu_interrupt.h
     src/backend/mcu_opcodes.h
     src/backend/mcu_timer.h
-    src/backend/path_util.h
     src/backend/pcm.h
     src/backend/ringbuffer.h
     src/backend/rom.h
@@ -98,6 +96,7 @@ target_sources(nuked-sc55-backend
 target_include_directories(nuked-sc55-backend PUBLIC "src/backend" "${CMAKE_CURRENT_BINARY_DIR}/backend")
 target_compile_features(nuked-sc55-backend PRIVATE cxx_std_23)
 target_enable_warnings(nuked-sc55-backend)
+target_enable_conversion_warnings(nuked-sc55-backend)
 
 #==============================================================================
 # Frontend shared code
@@ -107,6 +106,7 @@ target_sources(nuked-sc55-common
     PRIVATE
     src/common/gain.cpp
     src/common/rom_loader.cpp
+    src/common/path_util.cpp
 )
 target_compile_features(nuked-sc55-common PRIVATE cxx_std_23)
 target_enable_warnings(nuked-sc55-common)

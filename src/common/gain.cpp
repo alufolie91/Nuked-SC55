@@ -1,6 +1,12 @@
 #include "gain.h"
 
+#if defined(__clang__)
+#include <cerrno>
+#include <cstdlib>
+#else
 #include <charconv>
+#endif
+
 #include <cmath>
 
 namespace common
@@ -14,12 +20,12 @@ enum class ParseUnit
 
 float DbToScalar(float db)
 {
-    return std::powf(10.f, db / 20.f);
+    return std::pow(10.f, db / 20.f);
 }
 
 float ScalarToDb(float scalar)
 {
-    return 20.f * std::log10f(scalar);
+    return 20.f * std::log10(scalar);
 }
 
 static bool IsDigit(char ch)
@@ -91,12 +97,35 @@ ParseGainResult ParseGain(std::string_view str, float& out_gain)
 
     float num = 0.0f;
 
+#if defined(__clang__)
+    // Workaround for clang not supporting float from_chars.
+    // https://github.com/jcmoyer/Nuked-SC55/issues/52
+    char* end_ptr;
+    num = strtof(n_first, &end_ptr);
+
+    if (num == 0 && end_ptr == n_first)
+    {
+        return ParseGainResult::ParseFailed;
+    }
+
+    if (end_ptr != n_last)
+    {
+        return ParseGainResult::ParseFailed;
+    }
+
+    if (errno == ERANGE)
+    {
+        errno = 0;
+        return ParseGainResult::OutOfRange;
+    }
+#else
     auto fc_result = std::from_chars(n_first, n_last, num);
 
     if (fc_result.ec != std::errc{})
     {
         return ParseGainResult::ParseFailed;
     }
+#endif
 
     switch (unit)
     {

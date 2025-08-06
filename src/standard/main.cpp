@@ -34,14 +34,12 @@
 #include "audio.h"
 #include "audio_sdl.h"
 #include "cast.h"
-#include "command_line.h"
 #include "config.h"
 #include "emu.h"
 #include "lcd_sdl.h"
 #include "mcu.h"
 #include "midi.h"
 #include "output_common.h"
-#include "path_util.h"
 #include "pcm.h"
 #include "ringbuffer.h"
 #include <SDL.h>
@@ -52,7 +50,9 @@
 #include "output_asio.h"
 #include "output_sdl.h"
 
+#include "common/command_line.h"
 #include "common/gain.h"
+#include "common/path_util.h"
 #include "common/rom_loader.h"
 
 #ifdef _WIN32
@@ -374,7 +374,7 @@ FE_PickOutputResult FE_PickOutputDevice(std::string_view preferred_name, AudioOu
     }
 
     // maybe we have an index instead of a name
-    if (size_t out_device_id; TryParse(preferred_name, out_device_id))
+    if (size_t out_device_id; common::TryParse(preferred_name, out_device_id))
     {
         if (out_device_id < num_audio_devs)
         {
@@ -975,7 +975,7 @@ const char* FE_ParseErrorStr(FE_ParseError err)
 
 FE_ParseError FE_ParseCommandLine(int argc, char* argv[], FE_Parameters& result)
 {
-    CommandLineReader reader(argc, argv);
+    common::CommandLineReader reader(argc, argv);
 
     while (reader.Next())
     {
@@ -1044,12 +1044,12 @@ FE_ParseError FE_ParseCommandLine(int argc, char* argv[], FE_Parameters& result)
                 auto buffer_size_sv  = arg.substr(0, colon);
                 auto buffer_count_sv = arg.substr(colon + 1);
 
-                if (!TryParse(buffer_size_sv, result.buffer_size))
+                if (!common::TryParse(buffer_size_sv, result.buffer_size))
                 {
                     return FE_ParseError::BufferSizeInvalid;
                 }
 
-                if (!TryParse(buffer_count_sv, result.buffer_count))
+                if (!common::TryParse(buffer_count_sv, result.buffer_count))
                 {
                     return FE_ParseError::BufferCountInvalid;
                 }
@@ -1315,7 +1315,7 @@ ROM management options:
 )";
 #endif
 
-    std::string name = P_GetProcessPath().stem().generic_string();
+    std::string name = common::GetProcessPath().stem().generic_string();
     fprintf(stderr, USAGE_STR, name.c_str());
     common::PrintRomsets(stderr);
 #if NUKED_ENABLE_ASIO
@@ -1355,7 +1355,7 @@ int main(int argc, char *argv[])
 
     FE_Application frontend;
 
-    std::filesystem::path base_path = P_GetProcessPath().parent_path();
+    std::filesystem::path base_path = common::GetProcessPath().parent_path();
 
     if (std::filesystem::exists(base_path / "../share/nuked-sc55"))
         base_path = base_path / "../share/nuked-sc55";
@@ -1382,7 +1382,7 @@ int main(int argc, char *argv[])
 
     if (err != common::LoadRomsetError{})
     {
-        return false;
+        return 1;
     }
 
     frontend.romset = load_result.romset;

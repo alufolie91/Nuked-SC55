@@ -98,11 +98,12 @@ Run `nuked-sc55-render --help` to see a list of accepted romset names.
 If provided, the renderer will print a reference frequency and all EMIDI loop
 points to **stderr** when finished.
 
-Currently, this setting only enables handling of MIDI CC 116 (track loop begin)
-and 117 (track loop end).
+This flag enables handling of the following events:
 
-EMIDI also supports global loop begin and end via CC 118 and 119 respectively,
-but these are not yet supported.
+- CC 116 (track loop start)
+- CC 117 (track loop end)
+- CC 118 (global loop start)
+- CC 119 (global loop end)
 
 The messages are formatted as follows:
 
@@ -113,6 +114,9 @@ track 1 loop end at sample=4110616 timestamp=01:02.08
 ...
 track 12 loop start at sample=46192 timestamp=00:00.69
 track 12 loop end at sample=4110622 timestamp=01:02.08
+...
+global loop start at sample=0 timestamp=00:00.00
+global loop end at sample=1324138 timestamp=00:19.99
 ```
 
 There can be as many messages as MIDI *tracks* (as opposed to MIDI channels) in
@@ -123,3 +127,30 @@ It is normal for loop points to differ slightly when rendering with multiple
 instances - each instance will be slightly out of sync with the others due to
 small timing differences. In this case, any of the sample or timestamp values
 are acceptable.
+
+## Advanced parameters
+
+### `--override-* <path>`
+
+Overrides the path for a specific rom. This bypasses the default methods of
+locating roms.
+
+Each romset consists of multiple roms that are individually loaded into
+different locations within the emulator. These rom locations are named:
+
+- `rom1`
+- `rom2`
+- `smrom`
+- `waverom1`
+- `waverom2`
+- `waverom3`
+- `waverom-card`
+- `waverom-exp`
+
+A romset does not necessarily use all of these rom locations. For example, the
+mk2 will only use `rom1`, `rom2`, `smrom`, `waverom1`, and `waverom2`.
+
+To override a specific rom path you can replace the `*` in `--override-*
+<path>` with the name of the rom location you would like to load instead, e.g.
+`--override-rom2 ctf-patched-rom2.bin`. This is useful in case you have a
+patched rom that the emulator does not recognize.
