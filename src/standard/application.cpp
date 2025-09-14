@@ -331,8 +331,16 @@ void Application::RunEventLoop()
                 continue;
             }
 
+            const bool mKeydown = (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_M);
+
             for (Instance& inst : m_instances)
             {
+                if (mKeydown)
+                {
+                    //inst.GetEmulator().Reset();
+                    inst.GetEmulator().PostSystemReset(EMU_SystemReset::RESET_NOTES);
+                }
+
                 inst.HandleEvent(ev);
             }
         }
