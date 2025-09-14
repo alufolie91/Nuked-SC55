@@ -159,7 +159,10 @@ void Emulator::PostMIDI(std::span<const uint8_t> data)
 
 constexpr uint8_t GM_RESET_SEQ[] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 };
 constexpr uint8_t GS_RESET_SEQ[] = { 0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7 };
-constexpr uint8_t GM_HARD_RESET[] = {
+constexpr uint8_t GM_RESET_HARD_SEQ[] = {
+    // 0xBX - Channel || 0x79 - Reset All Controllers || 0x78 - All Notes Off
+    // Repeated for all 16 channels
+    // this gets rid of stuck notes :3
     0xB0, 0x79, 0x00, 0xB0, 0x78, 0x00,
     0xB1, 0x79, 0x00, 0xB1, 0x78, 0x00,
     0xB2, 0x79, 0x00, 0xB2, 0x78, 0x00,
@@ -191,8 +194,8 @@ void Emulator::PostSystemReset(EMU_SystemReset reset)
         case EMU_SystemReset::GM_RESET:
             PostMIDI(GM_RESET_SEQ);
             break;
-        case EMU_SystemReset::RESET_NOTES:
-            PostMIDI(GM_HARD_RESET);
+        case EMU_SystemReset::GM_RESET_HARD:
+            PostMIDI(GM_RESET_HARD_SEQ);
             break;
     }
 }

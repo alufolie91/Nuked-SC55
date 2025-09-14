@@ -338,7 +338,7 @@ void Application::RunEventLoop()
                 if (mKeydown)
                 {
                     //inst.GetEmulator().Reset();
-                    inst.GetEmulator().PostSystemReset(EMU_SystemReset::RESET_NOTES);
+                    inst.GetEmulator().PostSystemReset(EMU_SystemReset::GM_RESET_HARD);
                 }
 
                 inst.HandleEvent(ev);
