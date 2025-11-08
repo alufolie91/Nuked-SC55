@@ -37,6 +37,7 @@
 #include "bounded_ordered_bitset.h"
 #include "mcu_interrupt.h"
 #include "rom.h"
+#include "mcu_opcodes.h"
 #include <atomic>
 #include <cstdint>
 
@@ -275,10 +276,10 @@ struct mcu_t {
 
     uint32_t rom2_mask = ROM2_SIZE - 1;
 
-    int ga_int[8]{};
-    int ga_int_enable = 0;
-    int ga_int_trigger = 0;
-    int ga_lcd_counter = 0;
+    bool ga_int[8]{};
+    uint8_t ga_int_enable = 0; // mask of ga_int indices
+    uint8_t ga_int_trigger = 0; // index into ga_int
+    int ga_lcd_counter = 0; // timer range 0..500, decrements to 0
 
     std::atomic<uint32_t> button_pressed;
 
@@ -294,7 +295,7 @@ struct mcu_t {
     uint32_t operand_type = 0;
     uint16_t operand_ea = 0;
     uint8_t operand_ep = 0;
-    uint8_t operand_size = 0;
+    MCU_Operand_Size operand_size{};
     uint8_t operand_reg = 0;
     uint8_t operand_status = 0;
     uint16_t operand_data = 0;
@@ -350,10 +351,11 @@ inline uint8_t MCU_GetPageForRegister(mcu_t& mcu, uint8_t reg)
     return mcu.dp;
 }
 
-inline void MCU_ControlRegisterWrite(mcu_t& mcu, uint32_t reg, uint32_t siz, uint32_t data)
+inline void MCU_ControlRegisterWrite(mcu_t& mcu, uint32_t reg, MCU_Operand_Size siz, uint32_t data)
 {
-    if (siz)
+    switch (siz)
     {
+    case MCU_Operand_Size::WORD:
         if (reg == 0)
         {
             mcu.sr = (uint16_t)data;
@@ -375,9 +377,8 @@ inline void MCU_ControlRegisterWrite(mcu_t& mcu, uint32_t reg, uint32_t siz, uin
         {
             MCU_ErrorTrap(mcu);
         }
-    }
-    else
-    {
+        break;
+    case MCU_Operand_Size::BYTE:
         if (reg == 1)
         {
             mcu.sr &= ~0xff;
@@ -404,14 +405,16 @@ inline void MCU_ControlRegisterWrite(mcu_t& mcu, uint32_t reg, uint32_t siz, uin
         {
             MCU_ErrorTrap(mcu);
         }
+        break;
     }
 }
 
-inline uint32_t MCU_ControlRegisterRead(mcu_t& mcu, uint32_t reg, uint32_t siz)
+inline uint32_t MCU_ControlRegisterRead(mcu_t& mcu, uint32_t reg, MCU_Operand_Size siz)
 {
     uint32_t ret = 0;
-    if (siz)
+    switch (siz)
     {
+    case MCU_Operand_Size::WORD:
         if (reg == 0)
         {
             ret = mcu.sr & sr_mask;
@@ -426,16 +429,15 @@ inline uint32_t MCU_ControlRegisterRead(mcu_t& mcu, uint32_t reg, uint32_t siz)
         }
         else if (reg == 3) // FIXME: undocumented
         {
-            ret = (uint32_t)mcu.br | ((uint32_t)mcu.br << 8);;
+            ret = (uint32_t)mcu.br | ((uint32_t)mcu.br << 8);
         }
         else
         {
             MCU_ErrorTrap(mcu);
         }
         ret &= 0xffff;
-    }
-    else
-    {
+        break;
+    case MCU_Operand_Size::BYTE:
         if (reg == 1)
         {
             ret = mcu.sr & sr_mask;
@@ -461,16 +463,17 @@ inline uint32_t MCU_ControlRegisterRead(mcu_t& mcu, uint32_t reg, uint32_t siz)
             MCU_ErrorTrap(mcu);
         }
         ret &= 0xff;
+        break;
     }
     return ret;
 }
 
-inline void MCU_SetStatus(mcu_t& mcu, bool condition, uint32_t mask)
+inline void MCU_SetStatus(mcu_t& mcu, bool condition, uint16_t mask)
 {
     if (condition)
-        mcu.sr |= (uint16_t)mask;
+        mcu.sr |= mask;
     else
-        mcu.sr &= (uint16_t)(~mask);
+        mcu.sr &= ~mask;
 }
 
 inline void MCU_PushStack(mcu_t& mcu, uint16_t data)
@@ -552,7 +555,7 @@ uint8_t MCU_ReadP0(mcu_t& mcu);
 uint8_t MCU_ReadP1(mcu_t& mcu);
 void MCU_WriteP0(mcu_t& mcu, uint8_t data);
 void MCU_WriteP1(mcu_t& mcu, uint8_t data);
-void MCU_GA_SetGAInt(mcu_t& mcu, int line, int value);
+void MCU_GA_SetGAInt(mcu_t& mcu, uint8_t line, bool value);
 
 void MCU_EncoderTrigger(mcu_t& mcu, int dir);
 

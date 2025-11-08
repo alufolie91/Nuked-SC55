@@ -1002,7 +1002,7 @@ R_TrackList R_SplitTrackModulo(const SMF_Track& merged_track, size_t n)
 uint64_t R_NSPerStep(Emulator& emu)
 {
     // These are best guesses.
-    if (emu.GetMCU().is_mk1)
+    if (emu.GetMCU().is_mk1 || emu.GetMCU().is_jv880)
     {
         return 600;
     }
@@ -1336,7 +1336,7 @@ bool R_RenderTrack(const SMF_Data& data, const R_Parameters& params)
         }
 
         render_states[i].emu.Reset();
-        render_states[i].emu.GetPCM().disable_oversampling = params.disable_oversampling;
+        render_states[i].emu.GetPCM().enable_oversampling = !params.disable_oversampling;
 
         fprintf(stderr, "Initializing emulator #%02zu...\n", i);
         R_RunReset(render_states[i].emu, reset);

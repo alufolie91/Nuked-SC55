@@ -32,6 +32,7 @@ bool Instance::Initialize(const InstanceParameters& params)
     }
 
     m_instance_id  = params.instance_id;
+    m_format       = params.output_format;
     m_buffer_size  = params.buffer_size;
     m_buffer_count = params.buffer_count;
     m_gain         = params.gain;
@@ -61,7 +62,7 @@ bool Instance::Initialize(const InstanceParameters& params)
     }
 
     m_emu.Reset();
-    m_emu.GetPCM().disable_oversampling = !params.enable_oversampling;
+    m_emu.GetPCM().enable_oversampling = params.enable_oversampling;
 
     if (!m_emu.StartLCD())
     {

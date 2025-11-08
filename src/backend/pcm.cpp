@@ -624,7 +624,7 @@ void PCM_Update(pcm_t& pcm, uint64_t cycles)
             pcm.ram1[30][5] = (uint32_t)addclip20(pcm.accum_r,
                 (int32_t)(pcm.config.orval | (shifter & pcm.config.noise_mask)), 0);
 
-            if (!pcm.disable_oversampling && pcm.config.oversampling) // oversampling
+            if (pcm.enable_oversampling && pcm.config.oversampling) // oversampling
             {
                 pcm.ram2[30][10] = (uint16_t)shifter;
 
@@ -1137,11 +1137,11 @@ void PCM_Update(pcm_t& pcm, uint64_t cycles)
             int nibble_address = (!b6 && nibble_cmp1) ? address_loop : address; // 3
             const bool address_b4 = (nibble_address & 0x10) != 0;
             int wave_address = nibble_address >> 5;
-            int xor2 = (address_b4 ^ b7);
+            const bool xor2 = (address_b4 ^ b7);
             const bool check1 = xor2 && active;
-            int xor1 = (b15 ^ !nibble_cmp1);
-            int nibble_add = b6 ? check1 && xor1 : (!nibble_cmp1 && check1);
-            int nibble_subtract = b6 && !xor1 && active && !xor2;
+            const bool xor1 = (b15 ^ !nibble_cmp1);
+            const bool nibble_add = b6 ? check1 && xor1 : (!nibble_cmp1 && check1);
+            const bool nibble_subtract = b6 && !xor1 && active && !xor2;
             if (b7)
                 wave_address -= nibble_add - nibble_subtract;
             else
@@ -1149,7 +1149,7 @@ void PCM_Update(pcm_t& pcm, uint64_t cycles)
             wave_address &= 0xfffff;
 
             int newnibble = PCM_ReadROM(pcm, (uint32_t)((hiaddr << 20) | wave_address));
-            int newnibble_sel = address_b4 ^ ((b6 || !nibble_cmp1) && okey);
+            const bool newnibble_sel = address_b4 ^ ((b6 || !nibble_cmp1) && okey);
             if (newnibble_sel)
                 newnibble = (newnibble >> 4) & 15;
             else
@@ -1577,12 +1577,12 @@ void PCM_Update(pcm_t& pcm, uint64_t cycles)
 uint32_t PCM_GetOutputFrequency(const pcm_t& pcm)
 {
     uint32_t freq = (pcm.mcu->is_mk1 || pcm.mcu->is_jv880) ? 64000 : 66207;
-    if (pcm.disable_oversampling)
+    if (pcm.enable_oversampling)
     {
-        return freq / 2;
+        return freq;
     }
     else
     {
-        return freq;
+        return freq / 2;
     }
 }
