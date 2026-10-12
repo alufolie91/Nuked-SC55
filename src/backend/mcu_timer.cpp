@@ -1,35 +1,20 @@
 /*
  * Copyright (C) 2021, 2024 nukeykt
+ * Modified by J.C. Moyer
+ * Original source file: src/mcu_timer.cpp
  *
- *  Redistribution and use of this code or any derivative works are permitted
- *  provided that the following conditions are met:
+ * This file is part of Nuked-SC55.
  *
- *   - Redistributions may not be sold, nor may they be used in a commercial
- *     product or activity.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
  *
- *   - Redistributions that are modified from the original source must include the
- *     complete source code, including the source code for all components used by a
- *     binary built from the modified sources. However, as a special exception, the
- *     source code distributed need not include anything that is normally distributed
- *     (in either source or binary form) with the major components (compiler, kernel,
- *     and so on) of the operating system on which the executable runs, unless that
- *     component itself accompanies the executable.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- *   - Redistributions must reproduce the above copyright notice, this list of
- *     conditions and the following disclaimer in the documentation and/or other
- *     materials provided with the distribution.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
  */
 #include "mcu_timer.h"
 #include "mcu.h"
@@ -98,6 +83,13 @@ enum FRT_Field_Offset : uint8_t
     REG_ICRL  = 0x09,
 };
 
+// Calculates the next deadline for a timer. This is actually just a
+// pointer alignment algorithm. `interval` must be power-of-two.
+constexpr uint64_t AlignForward(uint64_t value, uint64_t interval)
+{
+    return (value + (interval - 1)) & (~(interval - 1));
+}
+
 void TIMER_Init(mcu_timer_t& timer, mcu_t& mcu)
 {
     timer.mcu = &mcu;
@@ -108,6 +100,7 @@ void TIMER_Reset(mcu_timer_t& timer)
     for (int i = 0; i < 3; ++i)
     {
         timer.frt[i] = {
+            .deadline  = 0,
             .tcr       = 0,
             .tcsr      = 0,
             .frc       = 0,
@@ -115,9 +108,12 @@ void TIMER_Reset(mcu_timer_t& timer)
             .ocrb      = 0xffff,
             .icr       = 0,
             .status_rd = 0,
+            .stride    = 4,
         };
     }
     timer.tmr = {
+        .deadline  = static_cast<uint64_t>(-1),
+        .stride    = 0,
         .tcr       = 0,
         .tcsr      = TMR_TCSR_BIT4,
         .tcora     = 0xff,
@@ -127,7 +123,7 @@ void TIMER_Reset(mcu_timer_t& timer)
     };
 }
 
-void TIMER_Write(mcu_timer_t& timer, uint32_t address, uint8_t data)
+void TIMER_WriteFRT(mcu_timer_t& timer, uint32_t address, uint8_t data)
 {
     uint32_t t = (address >> 4) - 1;
     if (t > 2)
@@ -137,9 +133,16 @@ void TIMER_Write(mcu_timer_t& timer, uint32_t address, uint8_t data)
     address &= 0x0f;
     switch (address)
     {
-    case REG_TCR:
+    case REG_TCR: {
         frt.tcr = data;
+
+        const uint8_t stride = timer.frt_step_table[frt.tcr & (FRT_TCR_CKS0 | FRT_TCR_CKS1)];
+
+        frt.deadline = AlignForward(timer.cycles, stride);
+        frt.stride   = stride;
+
         break;
+    }
     case REG_TCSR:
         frt.tcsr &= ~0xf;
         frt.tcsr |= data & 0xf;
@@ -183,7 +186,7 @@ void TIMER_Write(mcu_timer_t& timer, uint32_t address, uint8_t data)
     }
 }
 
-uint8_t TIMER_Read(mcu_timer_t& timer, uint32_t address)
+uint8_t TIMER_ReadFRT(mcu_timer_t& timer, uint32_t address)
 {
     uint32_t t = (address >> 4) - 1;
     if (t > 2)
@@ -222,15 +225,30 @@ uint8_t TIMER_Read(mcu_timer_t& timer, uint32_t address)
     return 0xff;
 }
 
-void TIMER2_Write(mcu_timer_t& timer, uint32_t address, uint8_t data)
+void TIMER_WriteTMR(mcu_timer_t& timer, uint32_t address, uint8_t data)
 {
     tmr_t& tmr = timer.tmr;
 
     switch (address)
     {
-    case DEV_TMR_TCR:
+    case DEV_TMR_TCR: {
         tmr.tcr = data;
+
+        const uint16_t stride = timer.tmr_step_table[tmr.tcr & (TMR_TCR_CKS0 | TMR_TCR_CKS1 | TMR_TCR_CKS2)];
+
+        if (stride == 0)
+        {
+            tmr.deadline = static_cast<uint64_t>(-1);
+        }
+        else
+        {
+            tmr.deadline = AlignForward(timer.cycles, stride);
+        }
+
+        tmr.stride = stride;
+
         break;
+    }
     case DEV_TMR_TCSR:
         tmr.tcsr &= ~0xf;
         tmr.tcsr |= data & 0xf;
@@ -265,7 +283,7 @@ void TIMER2_Write(mcu_timer_t& timer, uint32_t address, uint8_t data)
     }
 }
 
-uint8_t TIMER_Read2(mcu_timer_t& timer, uint32_t address)
+uint8_t TIMER_ReadTMR(mcu_timer_t& timer, uint32_t address)
 {
     tmr_t& tmr = timer.tmr;
 
@@ -288,15 +306,9 @@ uint8_t TIMER_Read2(mcu_timer_t& timer, uint32_t address)
     return 0xff;
 }
 
-
 inline void TIMER_ClockFrt(mcu_timer_t& timer, int frt_id)
 {
     frt_t& frt = timer.frt[frt_id];
-
-    if (timer.cycles & timer.frt_step_table[frt.tcr & (FRT_TCR_CKS0 | FRT_TCR_CKS1)])
-    {
-        return;
-    }
 
     const bool matcha = frt.frc == frt.ocra;
     const bool matchb = frt.frc == frt.ocrb;
@@ -330,18 +342,6 @@ inline void TIMER_ClockFrt(mcu_timer_t& timer, int frt_id)
 inline void TIMER_ClockTmr(mcu_timer_t& timer)
 {
     tmr_t& tmr = timer.tmr;
-
-    const uint16_t step_mask = timer.tmr_step_table[tmr.tcr & (TMR_TCR_CKS0 | TMR_TCR_CKS1 | TMR_TCR_CKS2)];
-
-    if (step_mask == 0)
-    {
-        return;
-    }
-
-    if (timer.cycles & step_mask)
-    {
-        return;
-    }
 
     const bool matcha = tmr.tcnt == tmr.tcora;
     const bool matchb = tmr.tcnt == tmr.tcorb;
@@ -378,26 +378,33 @@ inline void TIMER_ClockTmr(mcu_timer_t& timer)
 
 void TIMER_Clock(mcu_timer_t& timer, uint64_t cycles)
 {
-    while (timer.cycles * 2 < cycles) // FIXME
+    const uint64_t target_cycles = cycles / 2;
+
+    timer.cycles = target_cycles;
+
+    for (int i = 0; i < 3; i++)
     {
-        for (int i = 0; i < 3; i++)
+        while (timer.frt[i].deadline < target_cycles)
         {
             TIMER_ClockFrt(timer, i);
+            timer.frt[i].deadline += timer.frt[i].stride;
         }
+    }
 
+    while (timer.tmr.deadline < target_cycles)
+    {
         TIMER_ClockTmr(timer);
-
-        ++timer.cycles;
+        timer.tmr.deadline += timer.tmr.stride;
     }
 }
 
 // These tables are indexed by the low CKSn bits of the TCR.
-constexpr FRT_Step_Table FRT_STEP_TABLE_GENERIC = {3, 7, 31, 1};
-constexpr FRT_Step_Table FRT_STEP_TABLE_MK1     = {3, 7, 31, 3};
+constexpr FRT_Step_Table FRT_STEP_TABLE_GENERIC = {4, 8, 32, 2};
+constexpr FRT_Step_Table FRT_STEP_TABLE_MK1     = {4, 8, 32, 4};
 
 // A value of 0 means do not step.
-constexpr TMR_Step_Table TMR_STEP_TABLE_GENERIC = {0, 7, 63, 1023, 0, 1, 1, 1};
-constexpr TMR_Step_Table TMR_STEP_TABLE_MK1     = {0, 7, 63, 1023, 0, 3, 3, 3};
+constexpr TMR_Step_Table TMR_STEP_TABLE_GENERIC = {0, 8, 64, 1024, 0, 2, 2, 2};
+constexpr TMR_Step_Table TMR_STEP_TABLE_MK1     = {0, 8, 64, 1024, 0, 4, 4, 4};
 
 void TIMER_NotifyRomsetChange(mcu_timer_t& timer)
 {

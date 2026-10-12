@@ -1,39 +1,23 @@
 /*
- * Copyright (C) 2021, 2024 nukeykt
+ * Copyright (C) 2024-2026 J.C. Moyer
  *
- *  Redistribution and use of this code or any derivative works are permitted
- *  provided that the following conditions are met:
+ * This file is part of Nuked-SC55.
  *
- *   - Redistributions may not be sold, nor may they be used in a commercial
- *     product or activity.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
  *
- *   - Redistributions that are modified from the original source must include the
- *     complete source code, including the source code for all components used by a
- *     binary built from the modified sources. However, as a special exception, the
- *     source code distributed need not include anything that is normally distributed
- *     (in either source or binary form) with the major components (compiler, kernel,
- *     and so on) of the operating system on which the executable runs, unless that
- *     component itself accompanies the executable.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- *   - Redistributions must reproduce the above copyright notice, this list of
- *     conditions and the following disclaimer in the documentation and/or other
- *     materials provided with the distribution.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
  */
 #include "application.h"
 
 #include "common/path_util.h"
+#include "common/term_io.h"
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -57,7 +41,7 @@ bool GlobalInit()
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0)
     {
-        fprintf(stderr, "FATAL ERROR: Failed to initialize SDL: %s.\n", SDL_GetError());
+        common::Printf("FATAL ERROR: Failed to initialize SDL: %s.\n", SDL_GetError());
         fflush(stderr);
         return false;
     }
@@ -81,6 +65,8 @@ void PrintUsage()
 General options:
   -?, -h, --help                                Display this information.
   -v, --version                                 Display version information.
+  --debug                                       Enables debug messages.
+  --quiet                                       Do not print messages to stderr.
 
 Audio options:
   -p, --port         <device_name_or_number>    Set MIDI input port.
@@ -113,22 +99,24 @@ ROM management options:
 #endif
 
     std::string name = common::GetProcessPath().stem().generic_string();
-    fprintf(stderr, USAGE_STR, name.c_str());
-    common::PrintRomsets(stderr);
+    common::Printf(USAGE_STR, name.c_str());
+    common::PrintRomsets();
 #if NUKED_ENABLE_ASIO
-    fprintf(stderr, EXTRA_ASIO_STR);
+    common::Printf(EXTRA_ASIO_STR);
 #endif
     MIDI_PrintDevices();
-    PrintAudioDevices(stderr);
+    PrintAudioDevices();
 }
 
 int main(int argc, char* argv[])
 {
+    common::InitTermIO();
+
     CliParameters params;
     CliParseError result = ParseCommandLine(argc, argv, params);
     if (result != CliParseError::Success)
     {
-        fprintf(stderr, "error: %s\n", ParseErrorStr(result));
+        common::Printf("error: %s\n", ParseErrorStr(result));
         PrintUsage();
         return 1;
     }
@@ -148,11 +136,22 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (params.debug)
+    {
+        common::SetMinBackendLevel(Diag_Category::Debug);
+    }
+
+    if (params.quiet)
+    {
+        common::SetBackendLoggingEnabled(false);
+        common::SetFrontendLoggingEnabled(false);
+    }
+
     FixupParameters(params);
 
     if (!GlobalInit())
     {
-        fprintf(stderr, "FATAL ERROR: Failed to initialize global state\n");
+        common::Printf("FATAL ERROR: Failed to initialize global state\n");
         return 1;
     }
 
@@ -164,7 +163,7 @@ int main(int argc, char* argv[])
 
         if (!app.Initialize(params))
         {
-            fprintf(stderr, "FATAL ERROR: Failed to initialize application\n");
+            common::Printf("FATAL ERROR: Failed to initialize application\n");
             return 1;
         }
 

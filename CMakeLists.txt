@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 3.19)
-project (nuked-sc55 VERSION 0.7.0 LANGUAGES C CXX)
+project (nuked-sc55 VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -7,6 +7,7 @@ include(GNUInstallDirs)
 include(TargetWarnings)
 
 set(NUKED_SOURCE "unknown" CACHE STRING "Origin of this build")
+option(NUKED_ENABLE_DECODER2 "Enable new instruction decoder" ON)
 
 #==============================================================================
 # Tests
@@ -20,6 +21,15 @@ set(NUKED_TEST_JV880_NVRAM "" CACHE PATH
 if(NUKED_ENABLE_TESTS)
     enable_testing()
     add_subdirectory("test")
+endif()
+
+#==============================================================================
+# Documentation
+#==============================================================================
+option(NUKED_ENABLE_DOCS "Enable building documentation" OFF)
+
+if(NUKED_ENABLE_DOCS)
+    add_subdirectory("doc")
 endif()
 
 #==============================================================================
@@ -106,6 +116,32 @@ target_sources(nuked-sc55-backend
     src/backend/string_vector.h
     src/backend/submcu.h
 )
+
+if(NUKED_ENABLE_DECODER2)
+    target_sources(nuked-sc55-backend
+        PRIVATE
+        src/backend/decoder2/address_modes.cpp
+        src/backend/decoder2/cache.cpp
+        src/backend/decoder2/disassemble.cpp
+        src/backend/decoder2/disassemble_handlers.cpp
+        src/backend/decoder2/disassemblers_address.cpp
+        src/backend/decoder2/disassemblers_imm16.cpp
+        src/backend/decoder2/disassemblers_imm8.cpp
+        src/backend/decoder2/disassemblers_rn.cpp
+        src/backend/decoder2/disassemblers_top.cpp
+        src/backend/decoder2/dispatch.cpp
+        src/backend/decoder2/dispatchers_aa.cpp
+        src/backend/decoder2/dispatchers_arn.cpp
+        src/backend/decoder2/dispatchers_d8d16_rn.cpp
+        src/backend/decoder2/dispatchers_imm16.cpp
+        src/backend/decoder2/dispatchers_postinc_rn.cpp
+        src/backend/decoder2/dispatchers_predec_rn.cpp
+        src/backend/decoder2/dispatchers_rn.cpp
+        src/backend/decoder2/dispatchers_top.cpp
+        src/backend/decoder2/instruction_handlers.cpp
+    )
+endif()
+
 target_include_directories(nuked-sc55-backend PUBLIC "src/backend" "${CMAKE_CURRENT_BINARY_DIR}/backend")
 target_compile_features(nuked-sc55-backend PRIVATE cxx_std_23)
 target_enable_warnings(nuked-sc55-backend)
@@ -120,6 +156,7 @@ target_sources(nuked-sc55-common
     src/common/gain.cpp
     src/common/rom_loader.cpp
     src/common/path_util.cpp
+    src/common/term_io.cpp
 )
 target_compile_features(nuked-sc55-common PRIVATE cxx_std_23)
 target_enable_warnings(nuked-sc55-common)
@@ -234,4 +271,3 @@ target_enable_conversion_warnings(nuked-sc55-render)
 # Installables
 #==============================================================================
 install(TARGETS nuked-sc55-render)
-install(DIRECTORY doc/ DESTINATION ${CMAKE_INSTALL_DOCDIR})

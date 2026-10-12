@@ -1,10 +1,28 @@
+/*
+ * Copyright (C) 2024-2026 J.C. Moyer
+ *
+ * This file is part of Nuked-SC55.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+
 #include "smf.h"
 #include "cast.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <fstream>
+
+#include "common/term_io.h"
 
 // security: do not call without verifying [ptr,ptr+1] is a readable range
 // performance: 16 bit load + rol in clang and gcc, worse in MSVC
@@ -143,7 +161,7 @@ inline void Check(bool stat, const char* msg)
 {
     if (!stat)
     {
-        fprintf(stderr, "Panic: %s\n", msg);
+        common::Printf("Panic: %s\n", msg);
         exit(1);
     }
 }
@@ -312,7 +330,7 @@ bool SMF_ReadTrack(SMF_Reader& reader, SMF_Data& result, uint64_t expected_end)
                     }
                     else
                     {
-                        fprintf(stderr, "Panic: unhandled Fx message: %x\n", new_event.status);
+                        common::Printf("Panic: unhandled Fx message: %x\n", new_event.status);
                         exit(1);
                     }
                 }
@@ -322,7 +340,7 @@ bool SMF_ReadTrack(SMF_Reader& reader, SMF_Data& result, uint64_t expected_end)
 
     if (reader.GetOffset() > expected_end)
     {
-        fprintf(stderr, "Read past expected track end\n");
+        common::Printf("Read past expected track end\n");
         return false;
     }
 
@@ -333,7 +351,7 @@ void SMF_PrintStats(const SMF_Data& data)
 {
     for (size_t i = 0; i < data.tracks.size(); ++i)
     {
-        fprintf(stderr, "Track %02zu: %zu events\n", i, data.tracks[i].events.size());
+        common::Printf("Track %02zu: %zu events\n", i, data.tracks[i].events.size());
     }
 }
 
@@ -379,7 +397,7 @@ bool SMF_ReadChunk(SMF_Reader& reader, SMF_Data& data)
     }
     else
     {
-        fprintf(stderr, "Unexpected chunk type at %zu\n", (size_t)chunk_start);
+        common::Printf("Unexpected chunk type at %zu\n", (size_t)chunk_start);
         return false;
     }
 

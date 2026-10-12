@@ -12,14 +12,8 @@ frontend.
 
 ### Backend
 
-The backend is the emulator itself. Roughly speaking, these modules are
-considered to be part of the backend:
-
-- mcu and mcu_*
-- submcu
-- lcd
-- pcm
-- emu
+The backend is the emulator itself. These are generally the source files under
+`src/backend`.
 
 Modifications to the backend should not add, change, or remove functionality.
 These are enhancements to the emulator itself and should be first submitted
@@ -71,4 +65,15 @@ indentation) of surrounding code.
 
 As a goal, all tests should pass for every commit on master. This is not a hard
 rule, but having only functional commits makes finding bugs easier in some
-cases.
+cases. For PRs, it is sufficient to only run tests for mk1 (pick any version)
+and mk2 romsets.
+
+## LLM Contributions
+
+LLM usage must be disclosed in pull requests. Because LLM generated
+code currently has a dubious copyright status in much of the world,
+LLM authored contributions will be rejected.
+
+If you are determined to have used an LLM and have knowingly
+misrepresented the authorship of a PR or commit, you will be banned
+from the project.
